@@ -73,16 +73,33 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1   # venv, editable install,
 ```powershell
 ag-trace list -n 10                                   # newest first, with call counts
 ag-trace capture latest --label TR-P055-012-step-3    # or a cascade id
-ag-trace verify captures\<cascade_id>\<timestamp>     # evidence still matches manifest?
+ag-trace verify captures\<cascade_id>-<ts>-<hash>.zip  # or a capture folder
+ag-trace pack captures\<cascade_id>\<timestamp>       # zip an existing folder
 ag-trace derive captures\<cascade_id>\<timestamp>     # verify, then regenerate derived/
 ```
 
 Options: `--source api`, `--ag-home DIR` (or `$env:AG_HOME`), `--out DIR`
-(or `$env:AG_TRACE_OUT`; default `.\captures`), `--allow-truncated`.
+(or `$env:AG_TRACE_OUT`; default `.\captures`), `--allow-truncated`, `--no-zip`.
+
+### Attaching a capture to a test record
+
+`capture` ends by printing `attach  captures\<cascade_id>-<timestamp>-<hash>.zip`.
+**That zip is the one file to attach.** Its name carries the first 16 hex digits of
+its own SHA-256, so the link in the record says which bytes it means: a re-capture of
+the same conversation, a swapped file or a damaged copy cannot have the same name.
+`ag-trace verify <zip>` checks the name against the bytes, then every evidence file
+against the manifest inside. Nothing needs to be copied into the record by hand.
+
+This **binds** a record to a file; it does not prove who made it. Anyone who can edit
+the zip can rename it. Tamper evidence needs the hash kept somewhere the record's
+store cannot change.
+
+Zips are deterministic: packing the same capture again gives the same bytes and name.
 
 ### A capture
 
 ```
+captures\<cascade_id>-<local timestamp>-<hash>.zip     the folder below, zipped
 captures\<cascade_id>\<local timestamp>\
     manifest.json          tool version, source hash and git state; host; completeness;
                            cross-check; SHA-256 and size of every evidence file
@@ -102,7 +119,7 @@ captures\<cascade_id>\<local timestamp>\
 | Code | Meaning |
 |---|---|
 | 0 | Captured, `COMPLETE` |
-| 2 | Failed; **nothing written**. Or `verify`/`derive` found evidence that no longer matches its manifest |
+| 2 | Failed; **nothing written**. Or `verify`/`derive` found evidence that no longer matches its manifest, or a zip whose name does not match its bytes |
 | 3 | Written but **not demonstrably complete**: `SHORT`, `TRUNCATED`, `UNVERIFIED` (no `.db`), `INVALID`. Don't cite as complete |
 
 ## Limits

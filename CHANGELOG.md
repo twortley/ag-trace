@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-09-25
+
+- `capture` also writes `<cascade_id>-<timestamp>-<hash>.zip` beside the capture
+  folder and prints it as `attach`: the one file to attach to a test record. The name
+  carries the first 16 hex digits of the zip's SHA-256.
+- `verify` accepts a zip: checks the name against the bytes, rejects entries outside
+  the capture folder, then verifies the manifest inside.
+- New `pack` command zips an existing capture folder. Zips are deterministic.
+- `--no-zip` skips the zip.
+
 ## 0.3.0 — 2026-09-25
 
 - **Skills.** The skills offered to the model are read from the "Available skills" list

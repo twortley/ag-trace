@@ -13,8 +13,12 @@ regenerated with `derive`. Every step becomes a row, known type or not. Failure 
 
     ag-trace list [-n 15] [--source transcript|api]
     ag-trace capture latest|<cascade_id> [--source ...] [--out DIR] [--label TR-...]
-    ag-trace verify <capture_dir>
+    ag-trace verify <capture_dir | capture.zip>
     ag-trace derive <capture_dir>
+    ag-trace pack <capture_dir>
+
+`capture` also writes <cascade_id>-<timestamp>-<hash>.zip beside the folder: the one
+file to attach to a test evidence record.
 """
 
 import argparse
@@ -26,6 +30,7 @@ from pathlib import Path
 from ag_trace import TOOL_ID, __version__, live, transcript
 from ag_trace.derive import write_derived
 from ag_trace.evidence import CaptureError, load_verified, write_capture
+from ag_trace.pack import pack, verify_zip
 
 
 def cmd_list(a):
@@ -80,22 +85,35 @@ def cmd_capture(a):
         if skills["other_skill_md_reads"]:
             print(f"          + {len(skills['other_skill_md_reads'])} other SKILL.md read(s)")
     absent = (manifest.get("cross_check") or {}).get("absent_from_transcript") or []
-    for a in absent:
-        if isinstance(a, dict):
-            err = (a.get("db_error") or [""])[0][:100]
-            print(f"absent    step {a['step_index']}: db status {a['db_status']}"
+    for ab in absent:
+        if isinstance(ab, dict):
+            err = (ab.get("db_error") or [""])[0][:100]
+            print(f"absent    step {ab['step_index']}: db status {ab['db_status']}"
                   + (f" - {err}" if err else ""))
     print("steps     by type: " + ", ".join(f"{t}={n}" for t, n in census.most_common()))
     print(f"dir       {cap}")
     print(f"detail    {cap / 'derived' / 'summary.md'}")
+    if not a.no_zip:
+        z = pack(cap)
+        print(f"attach    {z}")
     if detail["completeness"] != "COMPLETE":
         sys.exit(3)  # written, but not demonstrably complete - do not cite as complete
 
 
 def cmd_verify(a):
-    manifest, files = load_verified(a.dir)
-    print(f"OK  {len(files)} evidence file(s) match manifest  "
-          f"({manifest.get('source')}, {manifest.get('completeness')})")
+    if a.dir.lower().endswith(".zip"):
+        manifest, files = verify_zip(a.dir)
+        what = "zip name matches its bytes; "
+    else:
+        manifest, files = load_verified(a.dir)
+        what = ""
+    print(f"OK  {what}{len(files)} evidence file(s) match manifest  "
+          f"({manifest.get('cascade_id')}, {manifest.get('source')}, "
+          f"{manifest.get('completeness')})")
+
+
+def cmd_pack(a):
+    print(f"attach    {pack(a.dir, a.to)}")
 
 
 def cmd_derive(a):
@@ -125,13 +143,19 @@ def main(argv=None):
     p.add_argument("--out", default=os.environ.get("AG_TRACE_OUT", "captures"),
                    help="capture root (default: $AG_TRACE_OUT or ./captures)")
     p.add_argument("--label", default=None, help="e.g. the TR/TC/step this capture evidences")
+    p.add_argument("--no-zip", action="store_true", help="skip writing the zip")
     p.add_argument("--allow-truncated", action="store_true",
                    help="accept transcript.jsonl when transcript_full.jsonl is absent (exit 3)")
     p.set_defaults(fn=cmd_capture)
 
-    p = sub.add_parser("verify", help="check evidence files against the manifest")
-    p.add_argument("dir")
+    p = sub.add_parser("verify", help="check a capture folder or zip")
+    p.add_argument("dir", help="capture folder, or a capture .zip")
     p.set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser("pack", help="zip an existing capture folder, hash in the name")
+    p.add_argument("dir")
+    p.add_argument("--to", default=None, help="output folder (default: the capture root)")
+    p.set_defaults(fn=cmd_pack)
 
     p = sub.add_parser("derive", help="verify, then regenerate derived/ from evidence")
     p.add_argument("dir")
