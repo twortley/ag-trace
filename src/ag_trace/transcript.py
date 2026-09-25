@@ -59,16 +59,21 @@ def user_request(content):
     return content.strip()
 
 
-def transcripts(home):
-    """[(cascade_id, path)] newest first by file modification time."""
-    found = [(p.parents[2].name, p)
-             for p in (home / "brain").glob(f"*/.system_generated/logs/{TRANSCRIPT}")]
-    return sorted(found, key=lambda x: x[1].stat().st_mtime, reverse=True)
+def transcripts(home, include_truncated=False):
+    """[(cascade_id, path)] newest first by file modification time. The full transcript
+    is preferred; with include_truncated, conversations that only have the truncated
+    one are included too, so none is silently left out of a listing."""
+    found = {}
+    names = (TRANSCRIPT, TRUNCATED) if include_truncated else (TRANSCRIPT,)
+    for name in names:
+        for p in (home / "brain").glob(f"*/.system_generated/logs/{name}"):
+            found.setdefault(p.parents[2].name, p)
+    return sorted(found.items(), key=lambda x: x[1].stat().st_mtime, reverse=True)
 
 
 def list_local(home):
     out = []
-    for cid, p in transcripts(home):
+    for cid, p in transcripts(home, include_truncated=True):
         try:
             rows = parse_rows(p.read_bytes())
         except CaptureError:
@@ -77,6 +82,7 @@ def list_local(home):
                     if r.get("type") == "USER_INPUT"), "")
         calls = sum(len(r.get("tool_calls") or []) for r in rows)
         out.append({"cascade_id": cid, "steps": len(rows), "tool_calls": calls,
+                    "truncated": p.name == TRUNCATED,
                     "first": rows[0].get("created_at") if rows else None,
                     "last": rows[-1].get("created_at") if rows else None,
                     "request": req.replace("\n", " ")})

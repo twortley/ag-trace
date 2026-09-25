@@ -271,3 +271,15 @@ def test_latest_is_most_recently_modified(tmp_path, capsys):
     assert run(["list", "--ag-home", str(home)]) == 0
     out = capsys.readouterr().out
     assert out.index(CID) < out.index("older")
+
+
+def test_list_includes_truncated_only_conversations(tmp_path, capsys):
+    home = make_home(tmp_path, full=False)
+    assert run(["list", "--ag-home", str(home)]) == 0
+    out = capsys.readouterr().out
+    assert CID in out and "TRUNC" in out and "1 truncated only" in out
+
+
+def test_latest_ignores_truncated_only(tmp_path):
+    home = make_home(tmp_path, full=False)
+    assert run(["capture", "latest", "--ag-home", str(home), "--out", str(tmp_path / "o")]) == 2

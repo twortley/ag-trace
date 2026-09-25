@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-09-25
+
+- `list` includes conversations that only have the truncated `transcript.jsonl`,
+  marked `TRUNC`, with a full/truncated count in the header. Previously they were
+  left out without notice (found on first Windows run: 11 listed of 54 stored).
+
 ## 0.2.0 — 2026-09-25
 
 - **New default source: `transcript`.** Reads Antigravity's on-disk

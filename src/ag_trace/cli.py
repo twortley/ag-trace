@@ -39,10 +39,14 @@ def cmd_list(a):
         return
     home = transcript.ag_home(a.ag_home)
     rows = transcript.list_local(home)
-    print(f"{len(rows)} conversation transcript(s) under {home / 'brain'}")
-    print(f"{'last step (UTC)':<20} {'steps':>5} {'calls':>5}  cascade_id{'':<27} request")
+    n_trunc = sum(r["truncated"] for r in rows)
+    print(f"{len(rows)} conversation(s) under {home / 'brain'} "
+          f"({len(rows) - n_trunc} full transcript, {n_trunc} truncated only)")
+    print(f"{'last step (UTC)':<20} {'steps':>5} {'calls':>5} {'file':<5}  "
+          f"cascade_id{'':<27} request")
     for r in rows[: a.n]:
-        print(f"{(r['last'] or '?')[:19]:<20} {r['steps']:>5} {r['tool_calls']:>5}  "
+        kind = "TRUNC" if r["truncated"] else "full"
+        print(f"{(r['last'] or '?')[:19]:<20} {r['steps']:>5} {r['tool_calls']:>5} {kind:<5}  "
               f"{r['cascade_id']}  {r['request'][:50]}")
 
 
