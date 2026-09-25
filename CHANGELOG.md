@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-09-25
+
+- `capture` prints tool calls and MCP calls by server for each user turn, and the path
+  to `summary.md`. It previously printed only a step-type census, which names no
+  tools and made a capture with 4 ollama-delegate calls look as if it had none.
+
 ## 0.2.1 — 2026-09-25
 
 - `list` includes conversations that only have the truncated `transcript.jsonl`,

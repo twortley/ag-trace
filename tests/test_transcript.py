@@ -280,6 +280,14 @@ def test_list_includes_truncated_only_conversations(tmp_path, capsys):
     assert CID in out and "TRUNC" in out and "1 truncated only" in out
 
 
+def test_capture_output_names_mcp_servers_per_turn(tmp_path, capsys):
+    home = make_home(tmp_path)
+    cap(home, tmp_path / "out")
+    out = capsys.readouterr().out
+    assert "turn 1     2 calls; MCP by server: obsidian=1, ollama-delegate=1" in out
+    assert "turn 2     1 calls; MCP by server: none" in out
+
+
 def test_latest_ignores_truncated_only(tmp_path):
     home = make_home(tmp_path, full=False)
     assert run(["capture", "latest", "--ag-home", str(home), "--out", str(tmp_path / "o")]) == 2

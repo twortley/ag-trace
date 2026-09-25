@@ -20,6 +20,7 @@ regenerated with `derive`. Every step becomes a row, known type or not. Failure 
 import argparse
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from ag_trace import TOOL_ID, __version__, live, transcript
@@ -64,8 +65,14 @@ def cmd_capture(a):
     print(f"steps     {detail['steps_received']}  {detail['completeness']}")
     print(f"evidence  {main_file} sha256 {manifest['evidence'][main_file]['sha256']}")
     print(f"calls     {len(calls)} requested")
+    for turn in sorted({c["turn"] for c in calls}):
+        by = Counter(c["tool"] for c in calls if c["turn"] == turn)
+        mcp = Counter(c["server"] for c in calls if c["turn"] == turn and c["server"])
+        mcp_s = ", ".join(f"{s}={n}" for s, n in mcp.most_common()) or "none"
+        print(f"  turn {turn:<3} {sum(by.values()):>3} calls; MCP by server: {mcp_s}")
+    print("steps     by type: " + ", ".join(f"{t}={n}" for t, n in census.most_common()))
     print(f"dir       {cap}")
-    print("census    " + ", ".join(f"{t}={n}" for t, n in census.most_common()))
+    print(f"detail    {cap / 'derived' / 'summary.md'}")
     if detail["completeness"] != "COMPLETE":
         sys.exit(3)  # written, but not demonstrably complete - do not cite as complete
 
