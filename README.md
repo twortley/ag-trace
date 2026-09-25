@@ -1,22 +1,47 @@
 # ag-trace
 
 Capture a Google Antigravity conversation as **lossless, hashed evidence** for
-agent evals: which tools were called, in what order, with what arguments and
-outcome.
+agent evals: which tools the agent called, in what order, with what arguments,
+per user turn.
 
-Antigravity keeps each conversation's full trajectory behind a local, undocumented
-LanguageServer API. `ag-trace` saves that response **exactly as received**,
-records its SHA-256 in a manifest, and derives one row per step for analysis.
+`ag-trace` copies what Antigravity recorded **exactly as it was read**, records a
+SHA-256 for every file in a manifest, cross-checks the step count against an
+independent record, and derives readable views. It fails loudly: a capture that
+cannot be shown to be complete is flagged, and a failed read writes nothing.
 
-It exists because a general-purpose exporter is the wrong shape for evidence:
-exporters render the steps they recognise and drop the rest, flatten tool
-arguments, and treat a failed fetch as an empty conversation. `ag-trace` keeps
-every step, keeps the raw response, and fails loudly.
+## Two sources
+
+| Source | Needs Antigravity running? | What it reads |
+|---|---|---|
+| `transcript` (default) | **No** — works for past conversations | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript_full.jsonl`, the large-output files beside it, and the step count in `conversations/<id>.db` |
+| `api` | Yes | The local LanguageServer API (undocumented) |
+
+### What the transcript source has to work around
+
+Observed on Antigravity for Windows, 2026-09-25, across 54 stored conversations:
+
+- **`transcript.jsonl` truncates** step content at ~4 KB. `transcript_full.jsonl` is
+  used. Older conversations have only the truncated file; capturing one needs
+  `--allow-truncated` and is marked `TRUNCATED`.
+- **Lines are in completion order, not step order.** A response that requested
+  tool calls can be written after the results. Derived views sort by
+  `step_index`; the evidence is kept as written.
+- **A step that did not finish can be missing from the transcript.** In one
+  conversation the `.db` held 87 steps and the transcript 86; the absent step was
+  a command result with a non-DONE status. `ag-trace` compares the two and lists
+  absent steps with their `.db` type and status.
+- **Argument values are sometimes JSON-encoded strings**, sometimes plain. Only
+  values that are themselves JSON string literals are decoded.
+- **MCP calls go through `call_mcp_tool`** with `ServerName` and `ToolName`
+  arguments; they are reported as `mcp:<server>/<tool>`.
+- **No call-to-result id.** Calls are what the model *requested*; results are
+  separate steps. `ag-trace` does not claim a pairing.
 
 ## Requirements
 
-- Windows, with Antigravity running and a workspace open
 - Python 3.9+ (standard library only; no runtime dependencies)
+- Windows for `--source api`; the transcript source reads files and runs anywhere
+  the Antigravity data directory is reachable
 
 ## Install
 
@@ -30,39 +55,46 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1   # venv, editable install,
 ## Use
 
 ```powershell
-ag-trace list -n 10                                  # newest conversations first
-ag-trace capture latest --label TR-P055-012-step-3   # or a cascade id
-ag-trace derive captures\<cascade_id>\<timestamp>    # regenerate derived files offline
+ag-trace list -n 10                                   # newest first, with call counts
+ag-trace capture latest --label TR-P055-012-step-3    # or a cascade id
+ag-trace verify captures\<cascade_id>\<timestamp>     # evidence still matches manifest?
+ag-trace derive captures\<cascade_id>\<timestamp>     # verify, then regenerate derived/
 ```
 
-Captures go to `.\captures` by default, or `--out DIR`, or `$env:AG_TRACE_OUT`.
+Options: `--source api`, `--ag-home DIR` (or `$env:AG_HOME`), `--out DIR`
+(or `$env:AG_TRACE_OUT`; default `.\captures`), `--allow-truncated`.
 
-### What a capture contains
+### A capture
 
-`captures\<cascade_id>\<local timestamp>\`
-
-| File | |
-|---|---|
-| `raw.json` | **The evidence.** Response bytes exactly as received |
-| `manifest.json` | SHA-256 of `raw.json`; tool version, source hash and `git describe`; capture time, host, Python; LanguageServer exe path; steps expected vs received; completeness |
-| `steps.jsonl` | Derived. One row per step: index, type, status, time, model, label, payload with long strings replaced by length + hash |
-| `steps.md` | Derived. Step-type census and a table |
+```
+captures\<cascade_id>\<local timestamp>\
+    manifest.json          tool version, source hash and git state; host; completeness;
+                           cross-check; SHA-256 and size of every evidence file
+    evidence\              exactly as read, never modified
+        transcript_full.jsonl
+        steps\<n>\output.txt
+    derived\               regenerable with `derive`
+        steps.jsonl        every step, in step order, with user turn
+        calls.jsonl        every requested tool call: turn, step, tool, server, args
+        summary.md         completeness, census, calls per turn, MCP calls by server
+```
 
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Captured, complete |
-| 2 | Failed; **nothing written** (API error, zero steps, malformed response, tampered raw on `derive`) |
-| 3 | Written but **SHORT**: fewer steps than the index reports. Don't cite as complete |
+| 0 | Captured, `COMPLETE` |
+| 2 | Failed; **nothing written**. Or `verify`/`derive` found evidence that no longer matches its manifest |
+| 3 | Written but **not demonstrably complete**: `SHORT`, `TRUNCATED`, `UNVERIFIED` (no `.db`), `INVALID`. Don't cite as complete |
 
 ## Limits
 
-- **Undocumented API.** An Antigravity update can change it. The manifest records
-  the LanguageServer build; the census in `steps.md` shows new or renamed step
-  types when that happens.
-- **Windows only** for discovery.
-- The CSRF token is used for the request and never written to disk.
+- **Everything read here is undocumented** and can change with any Antigravity
+  update. The derived census shows new step types; the tests encode the formats
+  observed so far.
+- The `.db` stores steps as protobuf; it is used only for its step count, index
+  and status, read from a copy so the live database is never opened.
+- The `api` source has not yet been exercised against a live LanguageServer.
 - **Captures can contain private content** (prompts, file contents, command
   output). `captures/` is git-ignored; keep it that way.
 
@@ -73,8 +105,12 @@ Captures go to `.\captures` by default, or `--out DIR`, or `$env:AG_TRACE_OUT`.
 .\.venv\Scripts\ruff.exe check src tests
 ```
 
+The tests are built around broken input: missing, truncated, malformed and
+out-of-order transcripts, steps absent from the transcript, altered and planted
+evidence files, and a live database that must not be touched.
+
 ## Licence and attribution
 
-Apache-2.0. The approach to LanguageServer discovery is derived from
+Apache-2.0. The LanguageServer approach in `live.py` is derived from
 [antigravity-history](https://github.com/neo1027144-creator/antigravity-history)
 @ `4046f8f7e808be28b8d5b8cc57bf2ec39d2cc9bd`; see [NOTICE](NOTICE).
