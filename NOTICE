@@ -1,0 +1,13 @@
+ag-trace
+Copyright 2026 Tim Wortley
+
+This product includes an approach derived from antigravity-history
+(https://github.com/neo1027144-creator/antigravity-history), commit
+4046f8f7e808be28b8d5b8cc57bf2ec39d2cc9bd (v0.2.6), Copyright its authors,
+licensed under the Apache License, Version 2.0.
+
+Derived: discovery of the Antigravity LanguageServer process, its CSRF token and
+port, and the GetAllCascadeTrajectories / GetCascadeTrajectorySteps endpoints.
+Changed: re-written with the standard library only; exact-PID port matching;
+errors raised instead of swallowed; no step-type whitelist; raw response kept
+unmodified and hashed.

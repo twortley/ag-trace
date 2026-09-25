@@ -1,0 +1,12 @@
+# Captures are evidence and may contain private conversation content.
+# They are never committed to this repo.
+captures/
+
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
