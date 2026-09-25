@@ -15,17 +15,16 @@ Observed properties that shape this module:
   as written.
 - A step whose status is not DONE can be absent from the transcript while present in the
   .db (seen: a run_command result with db status 7). So the step count is cross-checked
-  against the .db, and absent steps are listed with their db type and status.
+  against the .db, and absent steps are listed with their db type, status and error text.
+  The .db files are captured as evidence too (see db.py).
 No Antigravity process is needed, so past conversations can be captured too.
 """
 
 import json
 import os
-import shutil
-import sqlite3
-import tempfile
 from pathlib import Path
 
+from ag_trace import db as dbmod
 from ag_trace.evidence import CaptureError
 
 TRANSCRIPT = "transcript_full.jsonl"
@@ -89,29 +88,6 @@ def list_local(home):
     return out
 
 
-def db_steps(home, cid):
-    """({idx: (step_type, status)}, None) from conversations/<id>.db, or (None, reason).
-    Reads a copy, so the live database and its WAL are never opened."""
-    db = home / "conversations" / f"{cid}.db"
-    if not db.is_file():
-        return None, "no conversation .db"
-    with tempfile.TemporaryDirectory() as tmp:
-        for suffix in ("", "-wal", "-shm"):
-            src = Path(str(db) + suffix)
-            if src.is_file():
-                shutil.copy2(src, Path(tmp) / (db.name + suffix))
-        con = None
-        try:
-            con = sqlite3.connect(Path(tmp) / db.name)
-            q = con.execute("SELECT idx, step_type, status FROM steps")
-            return {i: (t, st) for i, t, st in q}, None
-        except sqlite3.Error as e:
-            return None, f"db unreadable: {e}"
-        finally:
-            if con is not None:
-                con.close()
-
-
 def capture_transcript(home, cid, allow_truncated=False):
     """Read one conversation. Returns (files, detail). Raises CaptureError."""
     if cid == "latest":
@@ -143,10 +119,11 @@ def capture_transcript(home, cid, allow_truncated=False):
     present = {i for i in indices if isinstance(i, int)}
     duplicates = sorted({i for i in present if indices.count(i) > 1})
     gaps = sorted(set(range(max(present) + 1)) - present) if present else []
-    db, why = db_steps(home, cid)
+    files.update(dbmod.read_files(home, cid))
+    analysis, why = dbmod.analyse(files, cid)
+    db = analysis["steps"] if analysis else None
     absent = sorted(set(db) - present) if db else gaps
-    absent_detail = [{"step_index": i, "db_step_type": db[i][0], "db_status": db[i][1]}
-                     for i in absent if db and i in db]
+    absent_detail = [{"step_index": i, **db[i]} for i in absent if db and i in db]
     if duplicates or len(present) != len(rows):
         completeness = "INVALID (duplicate or non-integer step_index)"
     elif absent:
@@ -167,6 +144,8 @@ def capture_transcript(home, cid, allow_truncated=False):
         "steps_received": len(rows),
         "completeness": completeness,
         "transcript_file": path.name,
+        "skills_available": analysis["skills_available"] if analysis else None,
+        "skills_list_from_gen_idx": analysis["skills_gen_idx"] if analysis else None,
         "cross_check": {"db_steps": len(db) if db else None, "db_note": why,
                         "in_step_order": indices == sorted(indices),
                         "absent_from_transcript": absent_detail or absent},

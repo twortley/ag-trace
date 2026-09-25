@@ -3,16 +3,23 @@
 Outputs, under <capture>/derived/:
     steps.jsonl   one row per step, every step, known type or not
     calls.jsonl   one row per tool call the model requested
-    summary.md    step-type census, tool calls per user turn, and the step table
+    skills.json   skills offered to the model, and which SKILL.md files it read
+    summary.md    completeness, skills, tool calls per user turn, and the step table
 
 A call row records what the model *requested*. Neither source links a call to its
 result by id, so no pairing is claimed; results are separate step rows.
+
+"Skill used" follows Antigravity's own definition, from the prompt it stores: the model
+"MUST read its SKILL.md instructions using view_file", at "the exact path provided in the
+Available skills list". So a skill counts as used when a view_file call targets one of
+those paths. That records that the instructions were read, not that they were followed.
 """
 
 import json
 import re
 from collections import Counter, OrderedDict
 
+from ag_trace import db as dbmod
 from ag_trace.evidence import CaptureError, sha256
 from ag_trace.transcript import parse_rows, user_request
 
@@ -146,13 +153,37 @@ def api_rows(api_steps):
     return steps, calls
 
 
+# ---------------------------------------------------------------- skills
+
+def _norm(path):
+    p = str(path or "").strip().replace("/", "\\").lower()
+    return p[len("file:\\\\\\"):] if p.startswith("file:\\\\\\") else p
+
+
+def skills_view(available, calls):
+    """{available, read, other_skill_md_reads}. `available` may be None (unknown)."""
+    by_path = {_norm(s["path"]): s["name"] for s in (available or [])}
+    read, other = [], []
+    for c in calls:
+        if c["tool"] != "view_file":
+            continue
+        path = (c.get("args") or {}).get("AbsolutePath")
+        name = by_path.get(_norm(path))
+        hit = {"turn": c["turn"], "step": c["step"], "at": c["at"], "path": path}
+        if name:
+            read.append({"name": name, **hit})
+        elif _norm(path).endswith("skill.md"):
+            other.append(hit)
+    return {"available": available, "read": read, "other_skill_md_reads": other}
+
+
 # ---------------------------------------------------------------- output
 
 def _md_cell(s):
     return (s or "").replace("|", "\\|").replace("\n", " ")
 
 
-def summary_md(steps, calls, manifest):
+def summary_md(steps, calls, manifest, skills=None):
     census = Counter(r["type"] for r in steps)
     out = [f"**Completeness: {manifest.get('completeness')}**", ""]
     absent = (manifest.get("cross_check") or {}).get("absent_from_transcript")
@@ -160,6 +191,21 @@ def summary_md(steps, calls, manifest):
         out += ["Steps in the .db but absent from the transcript (not DONE, typically):", ""]
         out += [f"- `{a}`" for a in absent]
         out += [""]
+    if skills is not None:
+        out += ["## Skills", ""]
+        if skills["available"] is None:
+            out += ["Available skills: **unknown** (no skills list in the .db).", ""]
+        else:
+            out += ["| Skill | Offered | SKILL.md read (turn / step) |", "|---|---|---|"]
+            for s in skills["available"]:
+                hits = [f"{r['turn']} / {r['step']}" for r in skills["read"]
+                        if r["name"] == s["name"]]
+                out.append(f"| {s['name']} | yes | {', '.join(hits) or '**no**'} |")
+            out += [""]
+        for o in skills["other_skill_md_reads"]:
+            out.append(f"- Other SKILL.md read (not in the offered list): turn {o['turn']}, "
+                       f"step {o['step']}: `{o['path']}`")
+        out += ["", "Read means the instructions were opened, not that they were followed.", ""]
     out += ["## Step census", ""]
     out += [f"- `{t}`: {n}" for t, n in census.most_common()]
     out += ["", f"**Tool calls requested: {len(calls)}**", "",
@@ -186,9 +232,12 @@ def summary_md(steps, calls, manifest):
 
 def write_derived(cap, manifest, files):
     source = manifest.get("source")
+    skills = None
     if source == "transcript":
         name = manifest.get("transcript_file") or "transcript_full.jsonl"
         steps, calls = transcript_rows(parse_rows(files[name]), set(files))
+        analysis, _ = dbmod.analyse(files, manifest["cascade_id"])
+        skills = skills_view(analysis["skills_available"] if analysis else None, calls)
     elif source == "api":
         steps, calls = api_rows(json.loads(files["api_steps.json"]).get("steps") or [])
     else:
@@ -199,7 +248,10 @@ def write_derived(cap, manifest, files):
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in steps)
     with open(d / "calls.jsonl", "w", encoding="utf-8", newline="\n") as f:
         f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in calls)
-    md, census = summary_md(steps, calls, manifest)
+    if skills is not None:
+        with open(d / "skills.json", "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(skills, indent=2, ensure_ascii=False) + "\n")
+    md, census = summary_md(steps, calls, manifest, skills)
     with open(d / "summary.md", "w", encoding="utf-8", newline="\n") as f:
         f.write(md)
-    return steps, calls, census
+    return steps, calls, census, skills

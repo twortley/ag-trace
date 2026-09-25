@@ -58,7 +58,7 @@ def cmd_capture(a):
         files, detail = transcript.capture_transcript(transcript.ag_home(a.ag_home), a.id,
                                                       a.allow_truncated)
     cap, manifest = write_capture(a.out, a.source, files, detail, a.label)
-    _, calls, census = write_derived(cap, manifest, files)
+    _, calls, census, skills = write_derived(cap, manifest, files)
     main_file = "api_steps.json" if a.source == "api" else detail["transcript_file"]
     print(f"captured  {detail['cascade_id']}  '{detail.get('title') or ''}'")
     print(f"source    {a.source}  ({len(files)} evidence file(s))")
@@ -70,6 +70,21 @@ def cmd_capture(a):
         mcp = Counter(c["server"] for c in calls if c["turn"] == turn and c["server"])
         mcp_s = ", ".join(f"{s}={n}" for s, n in mcp.most_common()) or "none"
         print(f"  turn {turn:<3} {sum(by.values()):>3} calls; MCP by server: {mcp_s}")
+    if skills is not None:
+        if skills["available"] is None:
+            print("skills    offered: unknown (no skills list in the .db)")
+        else:
+            read = ", ".join(f"{r['name']} (turn {r['turn']}, step {r['step']})"
+                             for r in skills["read"]) or "none"
+            print(f"skills    offered {len(skills['available'])}; SKILL.md read: {read}")
+        if skills["other_skill_md_reads"]:
+            print(f"          + {len(skills['other_skill_md_reads'])} other SKILL.md read(s)")
+    absent = (manifest.get("cross_check") or {}).get("absent_from_transcript") or []
+    for a in absent:
+        if isinstance(a, dict):
+            err = (a.get("db_error") or [""])[0][:100]
+            print(f"absent    step {a['step_index']}: db status {a['db_status']}"
+                  + (f" - {err}" if err else ""))
     print("steps     by type: " + ", ".join(f"{t}={n}" for t, n in census.most_common()))
     print(f"dir       {cap}")
     print(f"detail    {cap / 'derived' / 'summary.md'}")
@@ -85,7 +100,7 @@ def cmd_verify(a):
 
 def cmd_derive(a):
     manifest, files = load_verified(a.dir)
-    _, calls, census = write_derived(Path(a.dir), manifest, files)
+    _, calls, census, _ = write_derived(Path(a.dir), manifest, files)
     print(f"calls {len(calls)}; census " + ", ".join(f"{t}={n}" for t, n in census.most_common()))
 
 

@@ -43,11 +43,25 @@ def rows_fixture():
          "created_at": t.format(4), "content": "<USER_REQUEST>list models</USER_REQUEST>"},
         {"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE",
          "created_at": t.format(5), "tool_calls": [
-             {"name": "run_command", "args": {"CommandLine": '"dir | more"', "Cwd": "d:\\x"}}]},
+             {"name": "run_command", "args": {"CommandLine": '"dir | more"', "Cwd": "d:\\x"}},
+             {"name": "view_file", "args": {"AbsolutePath": SKILL_PATH.replace("\\", "/")}},
+             {"name": "view_file", "args": {"AbsolutePath": "D:/elsewhere/skill.md"}}]},
     ]
 
 
-def make_home(root, rows=None, db_extra=(), db=True, full=True, short=True, outputs=None):
+SKILL_PATH = "d:\\Projects\\T\\.agent\\skills\\local-inference-delegation\\SKILL.md"
+SKILLS_BLOCK = (
+    "<skills>\nYou can use specialized 'skills'.\n"
+    "- **SKILL.md** (required): The main instruction file\n"
+    "- **scripts/** - Helper scripts\n\n"
+    "Available skills:\n"
+    "- antigravity-guide (C:\\ag\\skills\\antigravity_guide\\SKILL.md): A guide.\n"
+    f"- local-inference-delegation ({SKILL_PATH}): Delegate bulk work (to Ollama).\n"
+    "\n</skills>")
+
+
+def make_home(root, rows=None, db_extra=(), db=True, full=True, short=True, outputs=None,
+              skills=True):
     home = Path(root) / "antigravity"
     logs = home / "brain" / CID / ".system_generated" / "logs"
     logs.mkdir(parents=True)
@@ -65,10 +79,16 @@ def make_home(root, rows=None, db_extra=(), db=True, full=True, short=True, outp
         (home / "conversations").mkdir()
         con = sqlite3.connect(home / "conversations" / f"{CID}.db")
         con.execute("CREATE TABLE steps (idx integer primary key, step_type integer, "
-                    "status integer)")
+                    "status integer, error_details blob)")
         idx = sorted({r["step_index"] for r in rows} | set(db_extra))
-        con.executemany("INSERT INTO steps VALUES (?, 132, ?)",
-                        [(i, 7 if i in db_extra else 3) for i in idx])
+        err = b"\x12\x05user denied permission to run command: Get-Content x\x00"
+        con.executemany("INSERT INTO steps VALUES (?, 132, ?, ?)",
+                        [(i, 7, err) if i in db_extra else (i, 3, None) for i in idx])
+        if skills:
+            con.execute("CREATE TABLE gen_metadata (idx integer primary key, data blob)")
+            con.execute("INSERT INTO gen_metadata VALUES (0, ?)", (b"\x0a\x01no skills here",))
+            con.execute("INSERT INTO gen_metadata VALUES (1, ?)",
+                        (b"\x0a\x02prompt " + SKILLS_BLOCK.encode() + b" tail\x00",))
         con.commit()
         con.close()
     return home
@@ -113,9 +133,10 @@ def test_step_absent_from_transcript_but_in_db_is_short(tmp_path):
     assert cap(home, tmp_path / "out") == 3
     d, m = the_capture(tmp_path / "out")
     assert m["completeness"].startswith("SHORT (6/7")
-    assert m["cross_check"]["absent_from_transcript"] == [
-        {"step_index": 6, "db_step_type": 132, "db_status": 7}]
-    assert "db_status': 7" in (d / "derived" / "summary.md").read_text(encoding="utf-8")
+    (absent,) = m["cross_check"]["absent_from_transcript"]
+    assert (absent["step_index"], absent["db_step_type"], absent["db_status"]) == (6, 132, 7)
+    assert "user denied permission" in absent["db_error"][0]
+    assert "user denied permission" in (d / "derived" / "summary.md").read_text(encoding="utf-8")
 
 
 def test_gap_in_step_index_is_short_even_without_db(tmp_path):
@@ -204,11 +225,59 @@ def test_mcp_calls_resolved_for_encoded_and_plain_args(tmp_path):
     d, _ = the_capture(tmp_path / "out")
     calls = jsonl(d / "derived" / "calls.jsonl")
     assert [c["tool"] for c in calls] == ["mcp:obsidian/search_simple",
-                                          "mcp:ollama-delegate/index_search", "run_command"]
-    assert [c["turn"] for c in calls] == [1, 1, 2]
+                                          "mcp:ollama-delegate/index_search", "run_command",
+                                          "view_file", "view_file"]
+    assert [c["turn"] for c in calls] == [1, 1, 2, 2, 2]
     assert calls[2]["args"]["CommandLine"] == "dir | more"  # JSON-encoded value decoded
     summary = (d / "derived" / "summary.md").read_text(encoding="utf-8")
     assert "- `obsidian`: 1" in summary and "- `ollama-delegate`: 1" in summary
+
+
+# ---------------------------------------------------------------- skills
+
+def test_skills_offered_parsed_after_marker_only(tmp_path):
+    home = make_home(tmp_path)
+    cap(home, tmp_path / "out")
+    d, m = the_capture(tmp_path / "out")
+    assert [s["name"] for s in m["skills_available"]] == ["antigravity-guide",
+                                                          "local-inference-delegation"]
+    assert m["skills_available"][1]["description"] == "Delegate bulk work (to Ollama)."
+    assert m["skills_list_from_gen_idx"] == 1
+
+
+def test_skill_read_matched_across_slash_style_and_case(tmp_path, capsys):
+    home = make_home(tmp_path)
+    cap(home, tmp_path / "out")
+    d, _ = the_capture(tmp_path / "out")
+    sk = json.loads((d / "derived" / "skills.json").read_text(encoding="utf-8"))
+    assert [(r["name"], r["turn"], r["step"]) for r in sk["read"]] == [
+        ("local-inference-delegation", 2, 5)]
+    assert [o["path"] for o in sk["other_skill_md_reads"]] == ["D:/elsewhere/skill.md"]
+    summary = (d / "derived" / "summary.md").read_text(encoding="utf-8")
+    assert "| antigravity-guide | yes | **no** |" in summary
+    assert "| local-inference-delegation | yes | 2 / 5 |" in summary
+    assert "SKILL.md read: local-inference-delegation (turn 2, step 5)" in capsys.readouterr().out
+
+
+def test_skills_unknown_without_list_is_said_not_guessed(tmp_path):
+    home = make_home(tmp_path, skills=False)
+    cap(home, tmp_path / "out")
+    d, m = the_capture(tmp_path / "out")
+    assert m["skills_available"] is None
+    sk = json.loads((d / "derived" / "skills.json").read_text(encoding="utf-8"))
+    assert sk["available"] is None and sk["read"] == []
+    assert "**unknown**" in (d / "derived" / "summary.md").read_text(encoding="utf-8")
+
+
+def test_db_captured_as_evidence_and_derive_uses_it(tmp_path):
+    home = make_home(tmp_path)
+    cap(home, tmp_path / "out")
+    d, m = the_capture(tmp_path / "out")
+    assert f"db/{CID}.db" in m["evidence"]
+    (home / "conversations" / f"{CID}.db").unlink()  # live db gone: derive must not need it
+    assert run(["derive", str(d)]) == 0
+    sk = json.loads((d / "derived" / "skills.json").read_text(encoding="utf-8"))
+    assert sk["read"][0]["name"] == "local-inference-delegation"
 
 
 def test_large_output_captured_and_linked(tmp_path):
@@ -250,7 +319,7 @@ def test_derive_is_reproducible(tmp_path):
     home = make_home(tmp_path)
     cap(home, tmp_path / "out")
     d, _ = the_capture(tmp_path / "out")
-    names = ("steps.jsonl", "calls.jsonl", "summary.md")
+    names = ("steps.jsonl", "calls.jsonl", "summary.md", "skills.json")
     before = [(d / "derived" / n).read_bytes() for n in names]
     assert run(["derive", str(d)]) == 0
     assert [(d / "derived" / n).read_bytes() for n in names] == before
@@ -285,7 +354,7 @@ def test_capture_output_names_mcp_servers_per_turn(tmp_path, capsys):
     cap(home, tmp_path / "out")
     out = capsys.readouterr().out
     assert "turn 1     2 calls; MCP by server: obsidian=1, ollama-delegate=1" in out
-    assert "turn 2     1 calls; MCP by server: none" in out
+    assert "turn 2     3 calls; MCP by server: none" in out
 
 
 def test_latest_ignores_truncated_only(tmp_path):

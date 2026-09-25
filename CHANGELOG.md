@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-09-25
+
+- **Skills.** The skills offered to the model are read from the "Available skills" list
+  in the prompt stored in the conversation `.db`. A skill counts as used when a
+  `view_file` call reads its `SKILL.md` at that path (Antigravity's own definition).
+  New `derived/skills.json`; `summary.md` has a skills table; `capture` prints skills read.
+  Other `SKILL.md` reads are listed separately. Unknown is reported as unknown.
+- **The conversation `.db` (+ `-wal`, `-shm`) is now captured as evidence**, so the
+  completeness cross-check and skills can be recomputed from the capture alone.
+- Steps absent from the transcript carry the readable text of their `.db` error, e.g.
+  "user denied permission to run command".
+
 ## 0.2.2 — 2026-09-25
 
 - `capture` prints tool calls and MCP calls by server for each user turn, and the path

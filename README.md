@@ -1,8 +1,8 @@
 # ag-trace
 
 Capture a Google Antigravity conversation as **lossless, hashed evidence** for
-agent evals: which tools the agent called, in what order, with what arguments,
-per user turn.
+agent evals: which tools and skills the agent used, in what order, with what
+arguments, per user turn.
 
 `ag-trace` copies what Antigravity recorded **exactly as it was read**, records a
 SHA-256 for every file in a manifest, cross-checks the step count against an
@@ -13,7 +13,7 @@ cannot be shown to be complete is flagged, and a failed read writes nothing.
 
 | Source | Needs Antigravity running? | What it reads |
 |---|---|---|
-| `transcript` (default) | **No** — works for past conversations | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript_full.jsonl`, the large-output files beside it, and the step count in `conversations/<id>.db` |
+| `transcript` (default) | **No** — works for past conversations | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript_full.jsonl`, the large-output files beside it, and `conversations/<id>.db` (+ `-wal`, `-shm`) |
 | `api` | Yes | The local LanguageServer API (undocumented) |
 
 ### What the transcript source has to work around
@@ -34,8 +34,24 @@ Observed on Antigravity for Windows, 2026-09-25, across 54 stored conversations:
   values that are themselves JSON string literals are decoded.
 - **MCP calls go through `call_mcp_tool`** with `ServerName` and `ToolName`
   arguments; they are reported as `mcp:<server>/<tool>`.
+- **A step that did not finish has readable error text in the `.db`**, e.g.
+  *"user denied permission to run command"*; it is shown with the absent step.
 - **No call-to-result id.** Calls are what the model *requested*; results are
   separate steps. `ag-trace` does not claim a pairing.
+
+## Skills
+
+Antigravity records no separate "skill used" event. Its own prompt, stored in the
+`.db`, defines use: the model *"MUST read its SKILL.md instructions using
+`view_file`"* at *"the exact path provided in the Available skills list"*. So:
+
+- **Offered** — the "Available skills" list in the stored prompt (the most recent
+  generation that carries one).
+- **Read** — a `view_file` call on one of those paths (slash style and case ignored).
+- **Other SKILL.md reads** — `SKILL.md` files read that were not on the list.
+
+*Read* means the instructions were opened, not that they were followed. If the list
+is not in the `.db`, skills are reported as unknown rather than guessed.
 
 ## Requirements
 
@@ -73,10 +89,12 @@ captures\<cascade_id>\<local timestamp>\
     evidence\              exactly as read, never modified
         transcript_full.jsonl
         steps\<n>\output.txt
+        db\<id>.db, .db-wal, .db-shm
     derived\               regenerable with `derive`
         steps.jsonl        every step, in step order, with user turn
         calls.jsonl        every requested tool call: turn, step, tool, server, args
-        summary.md         completeness, census, calls per turn, MCP calls by server
+        skills.json        skills offered, SKILL.md files read (turn, step)
+        summary.md         completeness, skills, calls per turn, MCP calls by server
 ```
 
 ### Exit codes
@@ -92,8 +110,11 @@ captures\<cascade_id>\<local timestamp>\
 - **Everything read here is undocumented** and can change with any Antigravity
   update. The derived census shows new step types; the tests encode the formats
   observed so far.
-- The `.db` stores steps as protobuf; it is used only for its step count, index
-  and status, read from a copy so the live database is never opened.
+- The `.db` stores steps as protobuf, which is not decoded. ag-trace reads step
+  index, type and status by SQL, and error text and the skills list as readable text
+  inside blobs. It is opened only from a temporary copy of the captured bytes.
+- A `.db` copied while Antigravity is still writing to that conversation may be
+  mid-update; capture after the conversation has finished.
 - The `api` source has not yet been exercised against a live LanguageServer.
 - **Captures can contain private content** (prompts, file contents, command
   output). `captures/` is git-ignored; keep it that way.
