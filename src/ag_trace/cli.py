@@ -1,7 +1,5 @@
 """ag-trace - capture Antigravity conversation traces as test evidence.
 
-Tooling record: TOOL-P058-004 (P058 35_Tooling). Backlog: P058 BLI-037.
-
 Two sources:
     transcript (default)  Antigravity's on-disk transcript. Offline; works for past
                           conversations; step count cross-checked against the .db.
@@ -12,7 +10,8 @@ regenerated with `derive`. Every step becomes a row, known type or not. Failure 
 2 with nothing written; a capture that is not demonstrably complete exits 3.
 
     ag-trace list [-n 15] [--source transcript|api]
-    ag-trace capture latest|<cascade_id> [--source ...] [--out DIR] [--label TR-...]
+    ag-trace capture latest|<cascade_id> [--source ...] [--out DIR] [--label TEXT]
+                     [--host-label TEXT]
     ag-trace verify <capture_dir | capture.zip>
     ag-trace derive <capture_dir>
     ag-trace pack <capture_dir>
@@ -62,7 +61,7 @@ def cmd_capture(a):
     else:
         files, detail = transcript.capture_transcript(transcript.ag_home(a.ag_home), a.id,
                                                       a.allow_truncated)
-    cap, manifest = write_capture(a.out, a.source, files, detail, a.label)
+    cap, manifest = write_capture(a.out, a.source, files, detail, a.label, a.host_label)
     _, calls, census, skills = write_derived(cap, manifest, files)
     main_file = "api_steps.json" if a.source == "api" else detail["transcript_file"]
     print(f"captured  {detail['cascade_id']}  '{detail.get('title') or ''}'")
@@ -124,7 +123,7 @@ def cmd_derive(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ag-trace", description=__doc__.splitlines()[0])
-    ap.add_argument("--version", action="version", version=f"ag-trace {__version__} ({TOOL_ID})")
+    ap.add_argument("--version", action="version", version=f"{TOOL_ID} {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def add_source(p):
@@ -142,7 +141,11 @@ def main(argv=None):
     add_source(p)
     p.add_argument("--out", default=os.environ.get("AG_TRACE_OUT", "captures"),
                    help="capture root (default: $AG_TRACE_OUT or ./captures)")
-    p.add_argument("--label", default=None, help="e.g. the TR/TC/step this capture evidences")
+    p.add_argument("--label", default=None,
+                   help="free text recorded in the manifest, e.g. the test and step this evidences")
+    p.add_argument("--host-label", default=None,
+                   help="recorded as the host instead of the machine name "
+                        "(default: $AG_TRACE_HOST, else the machine name)")
     p.add_argument("--no-zip", action="store_true", help="skip writing the zip")
     p.add_argument("--allow-truncated", action="store_true",
                    help="accept transcript.jsonl when transcript_full.jsonl is absent (exit 3)")

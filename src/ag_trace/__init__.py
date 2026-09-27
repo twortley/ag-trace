@@ -1,4 +1,4 @@
 """ag-trace: capture Antigravity conversation traces as hashed test evidence."""
 
-TOOL_ID = "TOOL-P058-004"
-__version__ = "0.4.0"
+TOOL_ID = "ag-trace"
+__version__ = "1.0.0"

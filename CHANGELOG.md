@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.0 — 2026-09-26
+
+First public release.
+
+- **The manifest names the tool `ag-trace`.** It carried an internal registry id,
+  written into every capture. Captures made by 0.4.0 still verify: `verify` checks
+  the evidence against the manifest, not the tool's name.
+- **`--host-label`** (or `$AG_TRACE_HOST`) records a name of your choosing as the
+  capture's host instead of the machine name. Captures get attached to shared
+  records; a hostname is yours to disclose. The default is unchanged.
+- **CI:** the offline suite on Ubuntu and Windows, Python 3.9 and 3.13; ruff; an
+  encoding check; a tag-triggered release that refuses a tag disagreeing with
+  `__version__`, and attaches the wheel and sdist.
+- README: install from the repository URL or with `pip`, on Windows or elsewhere.
+- Used for the end-to-end verification of
+  [ollama-delegate](https://github.com/twortley/ollama-delegate) `v1.0.0`, where
+  captures decided three acceptance criteria that screenshots could not.
+
 ## 0.4.0 — 2026-09-25
 
 - `capture` also writes `<cascade_id>-<timestamp>-<hash>.zip` beside the capture

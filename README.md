@@ -14,7 +14,7 @@ cannot be shown to be complete is flagged, and a failed read writes nothing.
 | Source | Needs Antigravity running? | What it reads |
 |---|---|---|
 | `transcript` (default) | **No** — works for past conversations | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript_full.jsonl`, the large-output files beside it, and `conversations/<id>.db` (+ `-wal`, `-shm`) |
-| `api` | Yes | The local LanguageServer API (undocumented) |
+| `api` | Yes | The local LanguageServer API (undocumented). **Experimental** — tested against a faked server only |
 
 ### What the transcript source has to work around
 
@@ -61,25 +61,47 @@ is not in the `.db`, skills are reported as unknown rather than guessed.
 
 ## Install
 
+**As a tool** (any platform with Python 3.9+):
+
+```
+pip install git+https://github.com/twortley/ag-trace@v1.0.0
+ag-trace --version
+```
+
+**From a clone, with the tests — Windows (PowerShell):**
+
 ```powershell
-git clone <this repo> ag-trace
+git clone https://github.com/twortley/ag-trace.git
 cd ag-trace
 powershell -ExecutionPolicy Bypass -File .\setup.ps1   # venv, editable install, tests
 .\.venv\Scripts\Activate.ps1
+```
+
+**macOS and Linux (bash):**
+
+```bash
+git clone https://github.com/twortley/ag-trace.git
+cd ag-trace
+python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest -q
 ```
 
 ## Use
 
 ```powershell
 ag-trace list -n 10                                   # newest first, with call counts
-ag-trace capture latest --label TR-P055-012-step-3    # or a cascade id
+ag-trace capture latest --label "run 12, step 3"      # or a cascade id
 ag-trace verify captures\<cascade_id>-<ts>-<hash>.zip  # or a capture folder
 ag-trace pack captures\<cascade_id>\<timestamp>       # zip an existing folder
 ag-trace derive captures\<cascade_id>\<timestamp>     # verify, then regenerate derived/
 ```
 
 Options: `--source api`, `--ag-home DIR` (or `$env:AG_HOME`), `--out DIR`
-(or `$env:AG_TRACE_OUT`; default `.\captures`), `--allow-truncated`, `--no-zip`.
+(or `$env:AG_TRACE_OUT`; default `.\captures`), `--allow-truncated`, `--no-zip`,
+`--host-label TEXT` (or `$env:AG_TRACE_HOST`).
+
+**The manifest records the machine's hostname** as the capture's `host`, unless
+`--host-label` names it otherwise. Set it before attaching captures anywhere shared.
 
 ### Attaching a capture to a test record
 
@@ -132,11 +154,17 @@ captures\<cascade_id>\<local timestamp>\
   inside blobs. It is opened only from a temporary copy of the captured bytes.
 - A `.db` copied while Antigravity is still writing to that conversation may be
   mid-update; capture after the conversation has finished.
-- The `api` source has not yet been exercised against a live LanguageServer.
+- The `api` source has not yet been exercised against a live LanguageServer. It
+  talks only to `127.0.0.1`, bypasses any proxy, and accepts the LanguageServer's
+  self-signed certificate — which is why it never connects anywhere else.
 - **Captures can contain private content** (prompts, file contents, command
   output). `captures/` is git-ignored; keep it that way.
 
 ## Development
+
+CI runs the offline suite on Ubuntu and Windows, Python 3.9 and 3.13, plus ruff and
+an encoding check. **Nothing in CI runs Antigravity** — see the top of
+`.github/workflows/ci.yml` for what a green run does and does not mean.
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q

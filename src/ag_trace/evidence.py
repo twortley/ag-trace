@@ -10,6 +10,7 @@ A capture folder is:
 import datetime as dt
 import hashlib
 import json
+import os
 import platform
 import subprocess
 from pathlib import Path
@@ -43,7 +44,7 @@ def tool_identity():
             "tool_sha256": h.hexdigest(), "tool_git": git}
 
 
-def write_capture(out, source, files, detail, label=None):
+def write_capture(out, source, files, detail, label=None, host_label=None):
     """Write evidence files and manifest. All inputs are validated before this is called,
     so a failure here is an I/O failure, not a partial capture of bad data."""
     if not files:
@@ -61,7 +62,9 @@ def write_capture(out, source, files, detail, label=None):
         **tool_identity(),
         "python": platform.python_version(),
         "captured_at": now.isoformat(timespec="seconds"),
-        "host": platform.node(),
+        # The machine name, unless the user names it otherwise: captures get attached
+        # to shared records, and a hostname is theirs to disclose.
+        "host": host_label or os.environ.get("AG_TRACE_HOST") or platform.node(),
         "label": label,
         "source": source,
         **detail,
