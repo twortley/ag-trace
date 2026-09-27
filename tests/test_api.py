@@ -59,7 +59,48 @@ def test_capture_complete_writes_raw_unmodified(fake_ls, tmp_path):
     assert m["evidence"]["api_steps.json"]["sha256"] == hashlib.sha256(raw).hexdigest()
     assert m["completeness"] == "COMPLETE"
     assert m["steps_received"] == 4 and m["label"] == "T1"
-    assert m["tool"] == "TOOL-P058-004" and len(m["tool_sha256"]) == 64
+    assert m["tool"] == "ag-trace" and len(m["tool_sha256"]) == 64
+
+
+def m_tool(text):
+    return json.loads(text)["tool"]
+
+
+def test_manifest_names_no_private_registry_id(fake_ls, tmp_path):
+    """A public tool writes its own name into every manifest, never an internal id."""
+    run(["capture", "latest", "--source", "api", "--out", str(tmp_path)])
+    (d,) = capture_dirs(tmp_path)
+    text = (d / "manifest.json").read_text(encoding="utf-8")
+    assert m_tool(text) == "ag-trace" and "TOOL-P" not in text
+
+
+def test_host_label_replaces_the_machine_name(fake_ls, tmp_path, monkeypatch):
+    """Captures get attached to shared records; the host name is the user's to disclose."""
+    monkeypatch.setattr("platform.node", lambda: "REAL-HOSTNAME-42")
+    run(["capture", "latest", "--source", "api", "--out", str(tmp_path), "--host-label", "ENV-7"])
+    (d,) = capture_dirs(tmp_path)
+    m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    assert m["host"] == "ENV-7"
+    for f in tmp_path.rglob("*"):
+        if f.is_file() and f.suffix != ".zip":
+            assert b"REAL-HOSTNAME-42" not in f.read_bytes(), f.name
+
+
+def test_host_label_from_environment(fake_ls, tmp_path, monkeypatch):
+    monkeypatch.setattr("platform.node", lambda: "REAL-HOSTNAME-42")
+    monkeypatch.setenv("AG_TRACE_HOST", "lab-box")
+    run(["capture", "latest", "--source", "api", "--out", str(tmp_path)])
+    (d,) = capture_dirs(tmp_path)
+    assert json.loads((d / "manifest.json").read_text(encoding="utf-8"))["host"] == "lab-box"
+
+
+def test_host_defaults_to_the_machine_name(fake_ls, tmp_path, monkeypatch):
+    monkeypatch.setattr("platform.node", lambda: "REAL-HOSTNAME-42")
+    monkeypatch.delenv("AG_TRACE_HOST", raising=False)
+    run(["capture", "latest", "--source", "api", "--out", str(tmp_path)])
+    (d,) = capture_dirs(tmp_path)
+    m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    assert m["host"] == "REAL-HOSTNAME-42"
 
 
 def test_csrf_token_never_written(fake_ls, tmp_path):

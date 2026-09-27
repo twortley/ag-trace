@@ -1,0 +1,67 @@
+# CI for ag-trace.
+#
+# What a green run means: the offline test suite passes on Ubuntu and Windows, on
+# the declared floor (3.9) and a current Python; ruff is clean; every tracked text
+# file is UTF-8 with no BOM or stray non-breaking space, and LF except where
+# .gitattributes says CRLF.
+# What it does NOT mean: nothing here runs Antigravity. The tests use synthetic
+# stores and a faked LanguageServer; the formats they encode are the ones observed,
+# and Antigravity can change them without notice.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: ag-trace --version
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install ruff
+      - run: ruff check src tests
+      - run: python ci/check_encoding.py
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Refuses a tag that disagrees with __version__ or has no CHANGELOG entry.
+      - run: python ci/release_notes.py "${GITHUB_REF_NAME}" > notes.md
+      - run: python -m pip install build && python -m build
+      - run: gh release create "${GITHUB_REF_NAME}" dist/* --title "ag-trace ${GITHUB_REF_NAME}" --notes-file notes.md --verify-tag
+        env:
+          GH_TOKEN: ${{ github.token }}
